@@ -1,0 +1,5 @@
+---
+deployment:
+  tasks:
+    - export DEPLOYPATH=$HOME/docxels.pixelslimited.ng/
+    - /bin/cp -R index.html privacy.html terms.html styles.css robots.txt sitemap.xml $DEPLOYPATH
