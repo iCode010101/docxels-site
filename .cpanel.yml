@@ -2,4 +2,5 @@
 deployment:
   tasks:
     - export DEPLOYPATH=$HOME/docxels.pixelslimited.ng/
+    - mkdir -p $DEPLOYPATH/dashboard && /bin/cp -R dashboard/* $DEPLOYPATH/dashboard/
     - /bin/cp -R index.html privacy.html terms.html styles.css robots.txt sitemap.xml $DEPLOYPATH
