@@ -45,6 +45,31 @@
   }
   function strong(p) { return p.length >= 10 && /[a-z]/.test(p) && /[A-Z]/.test(p) && /\d/.test(p); }
 
+  // Asks for the 6-digit authenticator code and exchanges the recovery session for a two-step (aal2) one. Returns the new token or null.
+  async function upgrade(token, msg) {
+    const hdr = { apikey: KEY, Authorization: "Bearer " + token, "Content-Type": "application/json" };
+    const u = await (await fetch(API + "/auth/v1/user", { headers: hdr })).json().catch(() => ({}));
+    const factor = (u.factors || []).find((f) => f.factor_type === "totp" && f.status === "verified");
+    if (!factor) throw new Error("No authenticator is set up for this account. Contact support.");
+    const code = await askCode(msg);
+    const ch = await (await fetch(API + "/auth/v1/factors/" + factor.id + "/challenge", { method: "POST", headers: hdr, body: "{}" })).json().catch(() => ({}));
+    if (!ch.id) throw new Error("Could not start the code check. Try again.");
+    const v = await fetch(API + "/auth/v1/factors/" + factor.id + "/verify", { method: "POST", headers: hdr, body: JSON.stringify({ challenge_id: ch.id, code }) });
+    const j = await v.json().catch(() => ({}));
+    if (!v.ok || !j.access_token) throw new Error("That code was not accepted. Wait for a new one and try again.");
+    return j.access_token;
+  }
+  function askCode(msg) {
+    return new Promise((resolve) => {
+      const input = h("input", { type: "text", inputmode: "numeric", autocomplete: "one-time-code", maxlength: "6", id: "otp", "aria-label": "6-digit authenticator code" });
+      const ok = h("button", { class: "btn primary", type: "button" }, "Confirm code");
+      const wrap = h("div", {}, h("label", { for: "otp" }, "Authenticator code (6 digits)"), input, ok);
+      msg.parentNode.insertBefore(wrap, msg);
+      input.focus();
+      ok.addEventListener("click", () => { if (/^\d{6}$/.test(input.value.trim())) { wrap.remove(); resolve(input.value.trim()); } else msg.textContent = "Enter the 6-digit code from your authenticator app."; });
+    });
+  }
+
   function form() {
     const f1 = passField("pw"), f2 = passField("pw2"), pw = f1.input, pw2 = f2.input;
     const msg = h("p", { class: "err", role: "alert" });
@@ -55,8 +80,18 @@
       if (pw.value !== pw2.value) { msg.textContent = "The two passwords are not the same."; return; }
       go.disabled = true;
       try {
-        const r = await fetch(API + "/auth/v1/user", { method: "PUT", headers: { apikey: KEY, Authorization: "Bearer " + token, "Content-Type": "application/json" }, body: JSON.stringify({ password: pw.value }) });
-        if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j.msg || j.message || "The link may have expired. Ask for a new one in the app."); }
+        const put = (tok) => fetch(API + "/auth/v1/user", { method: "PUT", headers: { apikey: KEY, Authorization: "Bearer " + tok, "Content-Type": "application/json" }, body: JSON.stringify({ password: pw.value }) });
+        let r = await put(token);
+        if (!r.ok) {
+          const j = await r.json().catch(() => ({}));
+          const m = j.msg || j.message || "";
+          if (!/aal2/i.test(m)) throw new Error(m || "The link may have expired. Ask for a new one in the app.");
+          // Two-step sign-in is on for this account: prove the authenticator code first, then retry with the upgraded session.
+          const tok2 = await upgrade(token, msg);
+          if (!tok2) { go.disabled = false; return; }
+          r = await put(tok2);
+          if (!r.ok) { const j2 = await r.json().catch(() => ({})); throw new Error(j2.msg || j2.message || "Could not change the password. Ask for a new link in the app."); }
+        }
         box(h("h1", {}, "Password changed"), h("p", {}, "Go back to the Docxels app and sign in with your new password."));
       } catch (e) { msg.textContent = e.message; go.disabled = false; }
     });
